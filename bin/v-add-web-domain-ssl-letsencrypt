@@ -2,12 +2,10 @@
 # info: adding ssl for domain
 # options: USER DOMAIN [SSL_HOME] [RESTART]
 #
-# The function turns on SSL support for a domain. Parameter ssl_dir is a path
-# to directory where 2 or 3 ssl files can be found. Certificate file 
-# domain.tld.crt and its key domain.tld.key  are mandatory. Certificate
-# authority domain.tld.ca file is optional. If home directory  parameter
-# (ssl_home) is not set, https domain uses public_shtml as separate
-# documentroot directory.
+# Rewritten from Source File: v-add-web-domain-ssl
+#
+# Generates SSL Certs with Let's Encrypt Authority and setup
+# VestaCP Domains.
 
 
 #----------------------------------------------------------#
@@ -21,6 +19,12 @@ domain_idn=$(idn -t --quiet -a "$domain")
 ssl_home=${3-same}
 restart="$4"
 
+# Other Definitions
+vesta_path="/usr/local/vesta"		# VestaCP Base Path
+le_client="/usr/local/letsencrypt"	# Path to the Let's Encrypt Client
+le_path="/etc/letsencrypt"		# Path to Let's Encrypt Folder
+le_age="5184000"			# Maximal age of the SSL Certs (60 Days)
+
 # Includes
 source $VESTA/func/main.sh
 source $VESTA/func/domain.sh
@@ -29,7 +33,7 @@ source $VESTA/conf/vesta.conf
 
 # Generate Domain List including all aliases
 function GenerateLSDomains () {
-        /usr/local/vesta/bin/v-list-web-domains-alias $1 | while read line
+        $vesta_path/bin/v-list-web-domains-alias $1 | while read line
         do
                 domains="-d $(echo $line | cut -d" " -f1)"
                 aliases=$(echo $line | cut -d" " -f2)
@@ -69,28 +73,33 @@ SSL_HOME="$ssl_home"
 ip=$(get_real_ip $IP)
 
 # Let's Encrypt Base
-le_base="/etc/letsencrypt/live/$domain"
+le_base="$le_path/live/$domain"
+le_mail=$($vesta_path/bin/v-get-user-value $user CONTACT)
+le_cmd="$le_client/letsencrypt-auto -m $le_mail -t --renew-by-default
+	--agree-tos --webroot -w /etc/letsencrypt"
+le_error="Let's Encrypt Certificate Generation failed, please have
+	a look in /var/log/letsencrypt/letsenrypt.log"
 
 # Check if Certificate already exist...
 if [ -f $le_base/fullchain.pem ]; then
 	# ... and is not older then 60 days
-	if ! [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -lt "5184000" ]; then
+	if ! [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -lt "$le_age" ]; then
 		# Generate Let's Encrypt Certificate
-		/root/letsencrypt/letsencrypt-auto -c /etc/letsencrypt/webroot.ini $(GenerateLSDomains "$user" "$domain") certonly
+		$le_cmd $(GenerateLSDomains "$user" "$domain") certonly >/dev/null 2>&1
 	fi
 else
 	# Generate Let's Encrypt Certificate
-	/root/letsencrypt/letsencrypt-auto -c /etc/letsencrypt/webroot.ini $(GenerateLSDomains "$user" "$domain") certonly
+	$le_cmd $(GenerateLSDomains "$user" "$domain") certonly >/dev/null 2>&1
 fi
 
 # Check if Cert Generation was successfully...
 if ! [ -f $le_base/fullchain.pem ]; then
-	echo "Let's Encrypt Certificate Generation failed, please see above"
+	echo $le_error
 	exit
 else
 	# ... and is not older then 60 days
-	if [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -gt "5184000" ]; then
-		echo "Let's Encrypt Certificate Generation failed, please see above"
+	if [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -gt "$le_age" ]; then
+		echo $le_error
 		exit
 	fi
 fi
