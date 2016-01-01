@@ -1,0 +1,234 @@
+#!/bin/bash
+# info: add web domain
+# options: USER DOMAIN IP [RESTART] [ALIASES] [PROXY_EXTENTIONS]
+#
+# The function adds virtual host to a server. In cases when a template is
+# undefined in the script, the template "default" will be used. The alias of
+# www.domain.tld type will be automatically assigned to the domain. If ip have
+# assocated dns name, this domain will also get the alias domain-tpl.$ipname.
+# An alias with the ip name is useful during the site testing while dns isn't
+# moved to a server yet.
+
+
+#----------------------------------------------------------#
+#                    Variable&Function                     #
+#----------------------------------------------------------#
+
+# Argument defenition
+user=$1
+domain=$(idn -t --quiet -u "$2" )
+domain=$(echo $domain | sed -e 's/\.*$//g' -e 's/^\.*//g')
+domain=$(echo $domain | tr '[:upper:]' '[:lower:]')
+domain_idn=$(idn -t --quiet -a "$domain")
+ip=$3; IP=$3
+restart=$4
+aliases=$5
+default_extentions="jpg,jpeg,gif,png,ico,svg,css,zip,tgz,gz,rar,bz2,doc,xls,\
+exe,pdf,ppt,txt,odt,ods,odp,odf,tar,wav,bmp,rtf,js,mp3,avi,mpeg,flv,html,htm"
+extentions=${6-$default_extentions}
+
+# Includes
+source $VESTA/func/main.sh
+source $VESTA/func/domain.sh
+source $VESTA/func/ip.sh
+source $VESTA/conf/vesta.conf
+
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN IP [RESTART] [ALIASES] [PROXY_EXTENTIONS]'
+validate_format 'user' 'domain' 'ip'
+is_system_enabled "$WEB_SYSTEM" 'WEB_SYSTEM'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+is_domain_new 'web'
+is_ip_valid
+is_ip_avalable
+is_package_full 'WEB_DOMAINS'
+template=$(get_user_value '$WEB_TEMPLATE')
+is_web_template_valid
+if [ ! -z "$aliases" ]; then
+    for domain_alias in $(echo "${aliases//,/ }"); do
+        is_domain_new 'web' "$domain_alias" 'alias'
+    done
+fi
+if [ ! -z "$PROXY_SYSTEM" ]; then
+    validate_format 'extentions'
+    proxy=$(get_user_value '$PROXY_TEMPLATE')
+    is_proxy_template_valid $proxy
+fi
+
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Checking domain backend in case PHP-FPM is configured
+if [ ! -z "$WEB_BACKEND" ]; then
+    is_web_backend_pool_valid
+    $BIN/v-add-web-domain-backend $user $domain
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        exit $rc
+    fi
+    get_domain_backend_values
+    backend=$(get_user_value '$BACKEND_TEMPLATE')
+    if [ -z "$backend" ]; then
+        backend='default'
+    fi
+fi
+
+# Defining variables for add_config function
+ip=$(get_real_ip $ip)
+group="$user"
+email="info@$domain"
+docroot="$HOMEDIR/$user/web/$domain/public_html"
+tpl_file="$WEBTPL/$WEB_SYSTEM/$WEB_BACKEND/$template.tpl"
+conf="$HOMEDIR/$user/conf/web/$WEB_SYSTEM.conf"
+
+# Defining domain aliases
+ip_name=$(get_ip_name)
+if [ -z "$aliases" ]; then
+    if [ -z "$ip_name" ]; then
+        aliases="www.$domain"
+    else
+        aliases="www.$domain,${domain//./-}.$ip_name"
+    fi
+else
+    if [ ! -z "$ip_name" ]; then
+        aliases="$aliases,${domain//./-}.$ip_name"
+    fi
+fi
+aliases_idn=$(idn -t --quiet -a $aliases)
+alias_string="ServerAlias ${aliases_idn//,/ }"
+
+# Adding web config
+add_web_config
+
+# Building directory tree
+mkdir -p $HOMEDIR/$user/web/$domain \
+      $HOMEDIR/$user/web/$domain/public_html \
+      $HOMEDIR/$user/web/$domain/public_shtml \
+      $HOMEDIR/$user/web/$domain/document_errors \
+      $HOMEDIR/$user/web/$domain/cgi-bin \
+      $HOMEDIR/$user/web/$domain/private \
+      $HOMEDIR/$user/web/$domain/stats \
+      $HOMEDIR/$user/web/$domain/logs
+
+# Adding domain logs
+touch /var/log/$WEB_SYSTEM/domains/$domain.bytes \
+      /var/log/$WEB_SYSTEM/domains/$domain.log \
+      /var/log/$WEB_SYSTEM/domains/$domain.error.log
+
+# Adding symlink for logs
+ln -f -s /var/log/$WEB_SYSTEM/domains/$domain.*log \
+    $HOMEDIR/$user/web/$domain/logs/
+
+# Adding domain skeleton
+if [ -e "$WEBTPL/skel/public_html/" ]; then
+    cp -r $WEBTPL/skel/public_html/ $HOMEDIR/$user/web/$domain/
+fi
+if [ -e "$WEBTPL/skel/public_shtml/" ]; then
+    cp -r $WEBTPL/skel/public_shtml/ $HOMEDIR/$user/web/$domain/
+fi
+if [ -e "$WEBTPL/skel/document_errors/" ]; then
+    cp -r $WEBTPL/skel/document_errors/ $HOMEDIR/$user/web/$domain/
+fi
+if [ -e "$WEBTPL/skel/cgi-bin/" ]; then
+    cp -r $WEBTPL/skel/cgi-bin/ $HOMEDIR/$user/web/$domain/
+fi
+
+# Changing tpl values
+for file in $(find "$HOMEDIR/$user/web/$domain/" -type f); do
+    sed -i "s/%domain%/$domain/g" $file
+done
+
+# Changing file owner
+chown -R $user:$user $HOMEDIR/$user/web/$domain
+chown root:$user /var/log/$WEB_SYSTEM/domains/$domain.* $conf
+
+# Changing file permissions
+chmod 640 $conf /var/log/$WEB_SYSTEM/domains/$domain.*
+chmod 551 $HOMEDIR/$user/web/$domain
+chmod 751 $HOMEDIR/$user/web/$domain/private \
+  $HOMEDIR/$user/web/$domain/cgi-bin \
+  $HOMEDIR/$user/web/$domain/public_html \
+  $HOMEDIR/$user/web/$domain/public_shtml \
+  $HOMEDIR/$user/web/$domain/document_errors
+chmod -f -R 665 $HOMEDIR/$user/web/$domain/cgi-bin/* \
+  $HOMEDIR/$user/web/$domain/public_html/* \
+  $HOMEDIR/$user/web/$domain/document_errors/* \
+chmod 551 $HOMEDIR/$user/web/$domain/stats \
+  $HOMEDIR/$user/web/$domain/logs
+
+# Running template trigger
+if [ -x $WEBTPL/$WEB_SYSTEM/$WEB_BACKEND/$template.sh ]; then
+    $WEBTPL/$WEB_SYSTEM/$WEB_BACKEND/$template.sh \
+        $user $domain $ip $HOMEDIR $docroot
+fi
+
+# Checking web config include
+web_conf="/etc/$WEB_SYSTEM/conf.d/vesta.conf"
+web_include=$(grep "$conf" $web_conf )
+if [ -z "$web_include" ] && [ "$WEB_SYSTEM" != 'nginx' ]; then
+    echo "Include $conf" >> $web_conf
+fi
+if [ -z "$web_include" ] && [ "$WEB_SYSTEM" = 'nginx' ]; then
+    echo "include $conf;" >> $web_conf
+fi
+
+# Checking proxy system
+if [ ! -z "$PROXY_SYSTEM" ]; then
+    PROXY_EXT="$extentions"
+    tpl_file="$WEBTPL/$PROXY_SYSTEM/$proxy.tpl"
+    conf="$HOMEDIR/$user/conf/web/$PROXY_SYSTEM.conf"
+    add_web_config
+    chown root:$user $conf
+    chmod 640 $conf
+    proxy_conf="/etc/$PROXY_SYSTEM/conf.d/vesta.conf"
+    if [ -z "$(grep "$conf" $proxy_conf)" ]; then
+        echo "include $conf;" >> $proxy_conf
+    fi
+    if [ -x $WEBTPL/$PROXY_SYSTEM/$proxy.sh ]; then
+        $WEBTPL/$PROXY_SYSTEM/$proxy.sh $user $domain $ip $HOMEDIR $docroot
+    fi
+fi
+
+
+#----------------------------------------------------------#
+#                       Vesta                              #
+#----------------------------------------------------------#
+
+# Increasing counters
+increase_ip_value "$ip"
+increase_user_value "$user" '$U_WEB_DOMAINS'
+increase_user_value "$user" '$U_WEB_ALIASES'
+
+# Defining domain variables
+str="DOMAIN='$domain' IP='$IP' IP6='' ALIAS='$aliases' TPL='$template'"
+str="$str SSL='no' SSL_HOME='same' SSL_LE='' FTP_USER='' FTP_MD5='' BACKEND='$backend'"
+str="$str PROXY='$proxy' PROXY_EXT='$extentions' STATS='' STATS_USER=''"
+str="$str STATS_CRYPT='' U_DISK='0' U_BANDWIDTH='0' SUSPENDED='no'"
+str="$str TIME='$TIME' DATE='$DATE'"
+
+# Registering domain
+echo "$str" >> $USER_DATA/web.conf
+
+# Restarting web server
+if [ "$restart" != 'no' ]; then
+    $BIN/v-restart-web
+    check_result $? "Web restart failed" >/dev/null
+
+    if [ ! -z "$PROXY_SYSTEM" ]; then
+        $BIN/v-restart-proxy
+        check_result $? "Proxy restart failed" >/dev/null
+    fi
+fi
+
+# Logging
+log_history "added web domain $domain"
+log_event "$OK" "$EVENT"
+
+exit
