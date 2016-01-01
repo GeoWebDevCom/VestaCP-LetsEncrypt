@@ -1,9 +1,19 @@
 #!/bin/bash
 #
 
+#----------------------------------------------------------#
+#                    Variable&Function                     #
+#----------------------------------------------------------#
+
+# Other Definitions
+vesta_path="/usr/local/vesta"           # VestaCP Base Path
+le_client="/usr/local/letsencrypt"      # Path to the Let's Encrypt Client
+le_path="/etc/letsencrypt"              # Path to Let's Encrypt Folder
+le_age="5184000"                        # Maximal age of the SSL Certs (60 Days)
+
 # Generate Domain List including all aliases
 function GenerateLSDomains () {
-        /usr/local/vesta/bin/v-list-web-domains-alias $1 | while read line
+        $vesta_path/bin/v-list-web-domains-alias $1 | while read line
         do
                 domains="-d $(echo $line | cut -d" " -f1)"
                 aliases=$(echo $line | cut -d" " -f2)
@@ -19,7 +29,7 @@ function GenerateLSDomains () {
 
 # Generate List from all Let's Encrypt Domains
 function GenerateLSList () {
-        /usr/local/vesta/bin/v-list-web-domains-ssl-letsencrypt $1 | while read line
+        $vesta_path/bin/v-list-web-domains-ssl-letsencrypt $1 | while read line
         do
                 domain=$(echo $line | cut -d" " -f1)
                 le=$(echo $line | cut -d" " -f2)
@@ -30,16 +40,54 @@ function GenerateLSList () {
 	echo $domains
 }
 
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
 for u in $(/usr/local/vesta/bin/v-list-users | cut -f1 -d' '  | tail -n+3); do
 	for d in $(GenerateLSList $u); do
+
+		# VestaCP Base
+		user=$u
+		domain=$d
+
+		# Includes
+		source $VESTA/func/main.sh
+		source $VESTA/func/domain.sh
+		source $VESTA/func/ip.sh
+		source $VESTA/conf/vesta.conf
+
+		# Let's Encrypt Base
+		le_base="$le_path/live/$d"
+		le_mail=$($vesta_path/bin/v-get-user-value $u CONTACT)
+		le_cmd="$le_client/letsencrypt-auto -m $le_mail -t --renew-by-default --agree-tos --webroot -w /etc/letsencrypt"
+		le_error="Let's Encrypt Certificate Generation failed for $d, please have
+		        a look in /var/log/letsencrypt/letsenrypt.log"
+
 		# Check if Certificate already exist...
-		le_base="/etc/letsencrypt/live/$d"
 		if [ -f $le_base/fullchain.pem ]; then
-        		# ... and is not older then 60 days
-        		if ! [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -lt "5184000" ]; then
-                		# Renew Let's Encrypt Certificate
-                		/root/letsencrypt/letsencrypt-auto -c /etc/letsencrypt/webroot.ini $(GenerateLSDomains $u $d) certonly
-        		fi
+		        # ... and is older then 60 days
+		        if [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -gt "$le_age" ]; then
+		                # Generate Let's Encrypt Certificate
+		                $le_cmd $(GenerateLSDomains "$u" "$d") certonly
+			        if [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -gt "3600" ]; then
+			                echo $le_error
+				else
+					# Adding certifiacte to user_data dir
+					cp -f $le_base/fullchain.pem    $USER_DATA/ssl/$domain.pem
+					cp -f $le_base/privkey.pem      $USER_DATA/ssl/$domain.key
+					cp -f $le_base/cert.pem         $USER_DATA/ssl/$domain.crt
+					cp -f $le_base/chain.pem        $USER_DATA/ssl/$domain.ca
+					chmod 660 $USER_DATA/ssl/$domain.*
+
+					# Adding certificate to user dir
+					cp -f $le_base/fullchain.pem    $HOMEDIR/$user/conf/web/ssl.$domain.pem
+					cp -f $le_base/privkey.pem      $HOMEDIR/$user/conf/web/ssl.$domain.key
+					cp -f $le_base/cert.pem         $HOMEDIR/$user/conf/web/ssl.$domain.crt
+					cp -f $le_base/chain.pem        $HOMEDIR/$user/conf/web/ssl.$domain.ca
+					chmod 660 $HOMEDIR/$user/conf/web/ssl.$domain.*
+				fi
+		        fi
 		fi
 	done
 done
