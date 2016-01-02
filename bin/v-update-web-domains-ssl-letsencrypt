@@ -5,6 +5,10 @@
 #                    Variable&Function                     #
 #----------------------------------------------------------#
 
+# Importing system enviroment  as we run this script
+#       mostly by cron wich not read it by itself
+source /etc/profile
+
 # Other Definitions
 vesta_path="/usr/local/vesta"           # VestaCP Base Path
 le_client="/usr/local/letsencrypt"      # Path to the Let's Encrypt Client
@@ -44,7 +48,7 @@ function GenerateLSList () {
 #                       Action                             #
 #----------------------------------------------------------#
 
-for u in $(/usr/local/vesta/bin/v-list-users | cut -f1 -d' '  | tail -n+3); do
+for u in $($vesta_path/bin/v-list-users | cut -f1 -d' '  | tail -n+3); do
 	for d in $(GenerateLSList $u); do
 
 		# VestaCP Base
@@ -86,6 +90,11 @@ for u in $(/usr/local/vesta/bin/v-list-users | cut -f1 -d' '  | tail -n+3); do
 					cp -f $le_base/cert.pem         $HOMEDIR/$user/conf/web/ssl.$domain.crt
 					cp -f $le_base/chain.pem        $HOMEDIR/$user/conf/web/ssl.$domain.ca
 					chmod 660 $HOMEDIR/$user/conf/web/ssl.$domain.*
+
+					# Logging
+					log_history "updated lets encrypt ssl support for $domain"
+					log_event "$OK" "$EVENT"
+
 				fi
 		        fi
 		fi
