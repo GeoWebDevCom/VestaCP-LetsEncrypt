@@ -94,13 +94,11 @@ fi
 
 # Check if Cert Generation was successfully...
 if ! [ -f $le_base/fullchain.pem ]; then
-	echo $le_error
-	exit
+	exit 601
 else
 	# ... and is not older then 60 days
 	if [ "$(( $(date +"%s") - $(stat -c "%Y" $le_base/fullchain.pem) ))" -gt "$le_age" ]; then
-		echo $le_error
-		exit
+		exit 602
 	fi
 fi
 
@@ -125,7 +123,7 @@ cp -f $le_base/fullchain.pem 	$HOMEDIR/$user/conf/web/ssl.$domain.pem
 cp -f $le_base/privkey.pem 	$HOMEDIR/$user/conf/web/ssl.$domain.key
 cp -f $le_base/cert.pem 	$HOMEDIR/$user/conf/web/ssl.$domain.crt
 cp -f $le_base/chain.pem 	$HOMEDIR/$user/conf/web/ssl.$domain.ca
-chmod 660 $HOMEDIR/$user/conf/web//ssl.$domain.*
+chmod 660 $HOMEDIR/$user/conf/web/ssl.$domain.*
 
 # Running template trigger
 if [ -x $WEBTPL/$WEB_SYSTEM/$WEB_BACKEND/$template.sh ]; then
