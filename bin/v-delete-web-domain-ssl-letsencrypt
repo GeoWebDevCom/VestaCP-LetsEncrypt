@@ -45,13 +45,13 @@ conf="$HOMEDIR/$user/conf/web/s$WEB_SYSTEM.conf"
 tpl_file="$WEBTPL/$WEB_SYSTEM/$WEB_BACKEND/$TPL.stpl"
 
 # Deleting domain
-del_web_config
+#del_web_config
 
 # Checking proxy
 if [ ! -z "$PROXY_SYSTEM" ] && [ ! -z "$PROXY" ]; then
     conf="$HOMEDIR/$user/conf/web/s$PROXY_SYSTEM.conf"
     tpl_file="$WEBTPL/$PROXY_SYSTEM/$PROXY.stpl"
-    del_web_config
+    #del_web_config
 fi
 
 # Deleting old certificate
@@ -77,6 +77,9 @@ if [ -z "$ssl_dom" ]; then
     rm -f $HOMEDIR/$user/conf/web/s$WEB_SYSTEM.conf
 
 fi
+
+# Rebuild Users Web Config for temporary fix.
+$VESTA/bin/v-rebuild-web-domains $user
 
 # Checking proxy
 if [ ! -z "$PROXY_SYSTEM" ]; then
