@@ -7,6 +7,7 @@ openssl dhparam -out /etc/nginx/dhparams.pem 4096
 $ git clone https://github.com/ScIT-Informatik-GmbH/VestaCP-LetsEncrypt.git .
 
 # Add SSL_LE String to existing web configurations.
+<code>
 #!/bin/bash
 
 VESTA="/usr/local/vesta"
@@ -22,3 +23,4 @@ for u in $($VESTA/bin/v-list-users | cut -f1 -d' ' | tail -n+3); do
         done < "$VESTA/data/users/$u/web.conf.bak"
         #rm $VESTA/data/users/$u/web.conf.bak
 done
+</code>
