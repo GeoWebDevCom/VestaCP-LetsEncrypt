@@ -24,3 +24,6 @@ for u in $($VESTA/bin/v-list-users | cut -f1 -d' ' | tail -n+3); do
         #rm $VESTA/data/users/$u/web.conf.bak
 done
 </code>
+
+# Clone LetsEncrypt to /usr/local/
+git clone https://github.com/letsencrypt/letsencrypt.git /usr/local/
